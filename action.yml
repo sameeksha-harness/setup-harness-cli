@@ -1,0 +1,29 @@
+name: 'Setup Harness CLI'
+description: 'Install and authenticate the Harness CLI (hc) so you can run hc commands directly in subsequent steps.'
+
+branding:
+  icon: 'package'
+  color: 'blue'
+
+inputs:
+  api-url:
+    description: 'Harness API base URL (e.g. https://app.harness.io). No trailing slash.'
+    required: true
+  account:
+    description: 'Harness account ID.'
+    required: true
+  token:
+    description: 'Harness PAT token. Always pass via ${{ secrets.* }} — the action masks it from logs automatically.'
+    required: true
+  hc-version:
+    description: 'Harness CLI (hc) release tag to install (e.g. v1.3.43). Defaults to latest.'
+    required: false
+    default: 'latest'
+
+outputs:
+  hc-version:
+    description: 'The resolved hc version that was installed (e.g. v1.3.43).'
+
+runs:
+  using: 'node24'
+  main: 'dist/index.js'

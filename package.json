@@ -1,0 +1,30 @@
+{
+  "name": "setup-harness-cli",
+  "version": "1.0.0",
+  "description": "GitHub Action to install and authenticate the Harness CLI",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "ncc build src/index.ts -o dist --source-map --license licenses.txt",
+    "test": "jest",
+    "lint": "eslint src tests --ext .ts",
+    "all": "npm run build && npm test"
+  },
+  "keywords": ["harness", "artifact-registry", "github-action", "harness-cli"],
+  "license": "MIT",
+  "dependencies": {
+    "@actions/cache": "3.2.4",
+    "@actions/core": "1.11.1",
+    "@actions/exec": "1.1.1"
+  },
+  "devDependencies": {
+    "@types/jest": "29.5.14",
+    "@types/node": "20.19.43",
+    "@typescript-eslint/eslint-plugin": "7.18.0",
+    "@typescript-eslint/parser": "7.18.0",
+    "@vercel/ncc": "0.38.4",
+    "eslint": "8.57.1",
+    "jest": "29.7.0",
+    "ts-jest": "29.4.11",
+    "typescript": "5.9.3"
+  }
+}

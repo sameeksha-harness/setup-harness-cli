@@ -1,0 +1,149 @@
+import * as core from '@actions/core';
+import * as exec from '@actions/exec';
+import * as cache from '@actions/cache';
+import * as fs from 'fs';
+import * as https from 'https';
+import * as os from 'os';
+import * as path from 'path';
+
+const INSTALL_SCRIPT_URL =
+  'https://raw.githubusercontent.com/harness/harness-cli/v2/install';
+
+const HC_VERSION_RE = /^v?\d+(\.[\w-]+)*$/;
+
+export function normalizeHcVersion(version: string): string {
+  const trimmed = version.trim();
+  if (!HC_VERSION_RE.test(trimmed)) {
+    throw new Error(
+      `Invalid hc-version "${trimmed}". Expected a release tag like v1.3.43`,
+    );
+  }
+  return trimmed.startsWith('v') ? trimmed : `v${trimmed}`;
+}
+
+export function versionsMatch(versionOutput: string, expected: string): boolean {
+  const want = normalizeHcVersion(expected).replace(/^v/, '');
+  const match = versionOutput.match(/hc version\s+(v?[\w.-]+)/i);
+  if (!match) return false;
+  return match[1].replace(/^v/, '') === want;
+}
+
+function fetchLatestHcVersion(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'api.github.com',
+      path: '/repos/harness/harness-cli/releases/latest',
+      headers: { 'User-Agent': 'setup-harness-cli' },
+    };
+    https.get(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data) as { tag_name?: string };
+          if (json.tag_name) resolve(json.tag_name);
+          else reject(new Error(`Unexpected GitHub API response: ${data.slice(0, 200)}`));
+        } catch (e) {
+          reject(new Error(`Failed to parse GitHub API response: ${e}`));
+        }
+      });
+    }).on('error', (e) => reject(new Error(`GitHub API request failed: ${e.message}`)));
+  });
+}
+
+export async function resolveHcVersion(requested: string): Promise<string> {
+  const trimmed = requested.trim().toLowerCase();
+  if (!trimmed || trimmed === 'latest') {
+    core.info('Resolving latest hc version from GitHub...');
+    const tag = await fetchLatestHcVersion();
+    core.info(`Latest hc version: ${tag}`);
+    return tag;
+  }
+  return normalizeHcVersion(requested);
+}
+
+function resolveInstallDir(): string {
+  const base = process.env.RUNNER_TEMP || os.tmpdir();
+  return path.join(base, 'setup-harness-cli-hc');
+}
+
+function cacheKey(version: string): string {
+  return `setup-hc-${version}-${os.platform()}-${os.arch()}`;
+}
+
+async function isHcOnPath(): Promise<boolean> {
+  const exitCode = await exec.exec('which', ['hc'], {
+    ignoreReturnCode: true,
+    silent: true,
+  });
+  return exitCode === 0;
+}
+
+async function readHcVersionOutput(): Promise<string> {
+  let stdout = '';
+  const exitCode = await exec.exec('hc', ['version'], {
+    ignoreReturnCode: true,
+    silent: true,
+    listeners: { stdout: (data: Buffer) => { stdout += data.toString(); } },
+  });
+  return exitCode === 0 ? stdout : '';
+}
+
+async function installHc(version: string, installDir: string): Promise<void> {
+  await fs.promises.mkdir(installDir, { recursive: true });
+  core.info(`Installing harness CLI (hc) ${version} into ${installDir}`);
+  const script = [
+    `curl -fsSL ${INSTALL_SCRIPT_URL}`,
+    `| INSTALL_DIR='${installDir}' HC_VERSION='${version}' sh`,
+  ].join(' ');
+  await exec.exec('sh', ['-c', script]);
+  core.addPath(installDir);
+}
+
+/**
+ * Ensures hc is installed and on PATH.
+ * - Skips install if PATH already has the right version.
+ * - Restores from cross-job cache before downloading.
+ * - Saves to cache after a fresh install.
+ * Returns the resolved version string (e.g. "v1.3.43").
+ */
+export async function ensureHc(requestedVersion = ''): Promise<string> {
+  const version = await resolveHcVersion(requestedVersion);
+  const installDir = resolveInstallDir();
+
+  if (await isHcOnPath()) {
+    const current = await readHcVersionOutput();
+    if (current && versionsMatch(current, version)) {
+      core.info(`hc ${version} already on PATH, skipping install`);
+      return version;
+    }
+    core.info(
+      `hc on PATH does not match ${version} (got: ${current.trim() || 'unknown'}); reinstalling`,
+    );
+  }
+
+  const key = cacheKey(version);
+  const cacheHit = await cache.restoreCache([installDir], key);
+  if (cacheHit) {
+    core.info(`Restored hc ${version} from cache`);
+    core.addPath(installDir);
+  } else {
+    await installHc(version, installDir);
+    try {
+      await cache.saveCache([installDir], key);
+      core.info(`Saved hc ${version} to cache`);
+    } catch (e) {
+      // Cache save failures are non-fatal — next job will just reinstall
+      core.info(`Cache save skipped: ${e}`);
+    }
+  }
+
+  const installed = await readHcVersionOutput();
+  if (!installed || !versionsMatch(installed, version)) {
+    throw new Error(
+      `hc install completed but version mismatch: expected ${version}, got: ${installed.trim() || '(no output)'}`,
+    );
+  }
+  core.info(`Using hc ${version}`);
+  return version;
+}
