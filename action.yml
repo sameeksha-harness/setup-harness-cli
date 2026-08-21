@@ -13,7 +13,7 @@ inputs:
     description: 'Harness account ID.'
     required: true
   token:
-    description: 'Harness PAT token. Always pass via ${{ secrets.* }} — the action masks it from logs automatically.'
+    description: 'Harness PAT token. Always pass via a secret — the action masks it from logs automatically.'
     required: true
   hc-version:
     description: 'Harness CLI (hc) release tag to install (e.g. v1.3.43). Defaults to latest.'
