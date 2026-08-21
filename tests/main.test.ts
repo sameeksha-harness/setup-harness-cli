@@ -156,6 +156,55 @@ describe('main orchestration', () => {
     expect(mockEndGroup).toHaveBeenCalled();
   });
 
+  test('uses env vars when action inputs are empty', async () => {
+    // Credential inputs empty — credentials come from env vars; hc-version still set
+    mockGetInput.mockImplementation((name: string) =>
+      name === 'hc-version' ? 'v1.3.43' : '',
+    );
+    process.env.HARNESS_URL        = 'https://env.harness.io';
+    process.env.HARNESS_ACCOUNT_ID = 'env-account';
+    process.env.HARNESS_PAT_TOKEN  = 'pat.env.token';
+    mockExecHappyPath();
+
+    await runModule();
+
+    delete process.env.HARNESS_URL;
+    delete process.env.HARNESS_ACCOUNT_ID;
+    delete process.env.HARNESS_PAT_TOKEN;
+
+    expect(mockSetSecret).toHaveBeenCalledWith('pat.env.token');
+    const authCall = mockExec.mock.calls.find(
+      (c: any[]) => c[0] === 'hc' && c[1][0] === 'auth',
+    );
+    expect(authCall[1]).toContain('https://env.harness.io');
+    expect(authCall[1]).toContain('env-account');
+    expect(mockSetFailed).not.toHaveBeenCalled();
+  });
+
+  test('input takes precedence over env var', async () => {
+    setupInputMock();
+    process.env.HARNESS_PAT_TOKEN = 'pat.from.env';
+    mockExecHappyPath();
+
+    await runModule();
+
+    delete process.env.HARNESS_PAT_TOKEN;
+
+    expect(mockSetSecret).toHaveBeenCalledWith('pat.acc-123.secret');
+  });
+
+  test('fails when neither input nor env var provides token', async () => {
+    mockGetInput.mockReturnValue('');
+    delete process.env.HARNESS_PAT_TOKEN;
+    mockExecHappyPath();
+
+    await runModule();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('HARNESS_PAT_TOKEN'),
+    );
+  });
+
   test('resolves latest version when hc-version is "latest"', async () => {
     setupInputMock({ 'hc-version': 'latest' });
     const https = require('https');

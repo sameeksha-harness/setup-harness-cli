@@ -7,14 +7,14 @@ branding:
 
 inputs:
   api-url:
-    description: 'Harness API base URL (e.g. https://app.harness.io). No trailing slash.'
-    required: true
+    description: 'Harness API base URL (e.g. https://app.harness.io). No trailing slash. Can also be set via the HARNESS_URL environment variable.'
+    required: false
   account:
-    description: 'Harness account ID.'
-    required: true
+    description: 'Harness account ID. Can also be set via the HARNESS_ACCOUNT_ID environment variable.'
+    required: false
   token:
-    description: 'Harness PAT token. Always pass via a secret — the action masks it from logs automatically.'
-    required: true
+    description: 'Harness PAT token. Always pass via a secret. Can also be set via the HARNESS_PAT_TOKEN environment variable.'
+    required: false
   hc-version:
     description: 'Harness CLI (hc) release tag to install (e.g. v1.3.43). Defaults to latest.'
     required: false
@@ -27,3 +27,5 @@ outputs:
 runs:
   using: 'node24'
   main: 'dist/index.js'
+  post: 'dist/cleanup.js'
+  post-if: always()

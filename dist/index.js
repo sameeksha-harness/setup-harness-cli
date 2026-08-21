@@ -34415,6 +34415,20 @@ const core = __importStar(__nccwpck_require__(7484));
 const exec = __importStar(__nccwpck_require__(5236));
 const auth_1 = __nccwpck_require__(9081);
 const install_1 = __nccwpck_require__(232);
+/**
+ * Reads an action input; falls back to an environment variable if the input is empty.
+ * Throws if both are absent and the value is required.
+ */
+function getInputOrEnv(inputName, envName, required = false) {
+    const fromInput = core.getInput(inputName);
+    if (fromInput)
+        return fromInput;
+    const fromEnv = process.env[envName] ?? '';
+    if (required && !fromEnv) {
+        throw new Error(`Input "${inputName}" is required. Set it via the action input or the ${envName} environment variable.`);
+    }
+    return fromEnv;
+}
 function buildExecFn() {
     return async (cmd, args, options = {}) => {
         let stdout = '';
@@ -34432,13 +34446,13 @@ function buildExecFn() {
 }
 async function run() {
     try {
-        const token = core.getInput('token', { required: true });
+        const token = getInputOrEnv('token', 'HARNESS_PAT_TOKEN', true);
         core.setSecret(token);
         const hcVersion = core.getInput('hc-version');
         const installedVersion = await (0, install_1.ensureHc)(hcVersion);
         const inputs = {
-            apiUrl: core.getInput('api-url', { required: true }),
-            account: core.getInput('account', { required: true }),
+            apiUrl: getInputOrEnv('api-url', 'HARNESS_URL', true),
+            account: getInputOrEnv('account', 'HARNESS_ACCOUNT_ID', true),
             token,
         };
         core.startGroup('hc auth login');
