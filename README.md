@@ -19,7 +19,7 @@ A GitHub Action that installs and authenticates the [Harness CLI (`hc`)](https:/
   run: hc artifact push generic my-registry ./artifact.tar.gz --name my-artifact --version ${{ github.sha }}
 ```
 
-After `setup-harness-cli` runs, `hc` is on `PATH` and authenticated. Use it in any subsequent `run:` step.
+After `setup-harness-cli` runs, `hc` is on `PATH` and authenticated. Use **any `hc` command** in subsequent `run:` steps — artifact push, pipeline triggers, service management, or anything else the Harness CLI supports.
 
 ## Examples
 
