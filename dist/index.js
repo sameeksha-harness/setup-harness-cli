@@ -34519,6 +34519,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.normalizeHcVersion = normalizeHcVersion;
 exports.versionsMatch = versionsMatch;
+exports.fetchLatestHcVersion = fetchLatestHcVersion;
 exports.resolveHcVersion = resolveHcVersion;
 exports.ensureHc = ensureHc;
 const core = __importStar(__nccwpck_require__(7484));
@@ -34546,15 +34547,29 @@ function versionsMatch(versionOutput, expected) {
 }
 function fetchLatestHcVersion() {
     return new Promise((resolve, reject) => {
+        const headers = {
+            'User-Agent': 'setup-harness-cli',
+            Accept: 'application/vnd.github+json',
+        };
+        // GITHUB_TOKEN is set automatically on GitHub-hosted runners and avoids
+        // unauthenticated rate limits (403) on /releases/latest.
+        const token = process.env.GITHUB_TOKEN;
+        if (token) {
+            headers.Authorization = `Bearer ${token}`;
+        }
         const options = {
             hostname: 'api.github.com',
             path: '/repos/harness/harness-cli/releases/latest',
-            headers: { 'User-Agent': 'setup-harness-cli' },
+            headers,
         };
         https.get(options, (res) => {
             let data = '';
             res.on('data', (chunk) => { data += chunk; });
             res.on('end', () => {
+                if (res.statusCode !== 200) {
+                    reject(new Error(`GitHub API /releases/latest returned ${res.statusCode}: ${data.slice(0, 200)}`));
+                    return;
+                }
                 try {
                     const json = JSON.parse(data);
                     if (json.tag_name)

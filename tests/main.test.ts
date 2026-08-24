@@ -210,6 +210,7 @@ describe('main orchestration', () => {
     const https = require('https');
     https.get.mockImplementation((_opts: any, cb: any) => {
       const res = {
+        statusCode: 200,
         on: (event: string, handler: any) => {
           if (event === 'data') handler(JSON.stringify({ tag_name: 'v2.0.0' }));
           if (event === 'end') handler();

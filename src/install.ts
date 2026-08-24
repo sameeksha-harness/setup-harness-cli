@@ -28,17 +28,34 @@ export function versionsMatch(versionOutput: string, expected: string): boolean 
   return match[1].replace(/^v/, '') === want;
 }
 
-function fetchLatestHcVersion(): Promise<string> {
+export function fetchLatestHcVersion(): Promise<string> {
   return new Promise((resolve, reject) => {
+    const headers: Record<string, string> = {
+      'User-Agent': 'setup-harness-cli',
+      Accept: 'application/vnd.github+json',
+    };
+    // GITHUB_TOKEN is set automatically on GitHub-hosted runners and avoids
+    // unauthenticated rate limits (403) on /releases/latest.
+    const token = process.env.GITHUB_TOKEN;
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
     const options = {
       hostname: 'api.github.com',
       path: '/repos/harness/harness-cli/releases/latest',
-      headers: { 'User-Agent': 'setup-harness-cli' },
+      headers,
     };
     https.get(options, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
       res.on('end', () => {
+        if (res.statusCode !== 200) {
+          reject(new Error(
+            `GitHub API /releases/latest returned ${res.statusCode}: ${data.slice(0, 200)}`,
+          ));
+          return;
+        }
         try {
           const json = JSON.parse(data) as { tag_name?: string };
           if (json.tag_name) resolve(json.tag_name);

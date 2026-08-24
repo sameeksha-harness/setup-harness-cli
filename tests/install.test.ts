@@ -34,9 +34,26 @@ jest.mock('https', () => ({
 const { normalizeHcVersion, versionsMatch, resolveHcVersion, ensureHc } =
   require('../src/install');
 
+function mockGithubLatest(statusCode: number, body: string) {
+  const https = require('https');
+  https.get.mockImplementation((_opts: any, cb: any) => {
+    const res = {
+      statusCode,
+      on: (event: string, handler: any) => {
+        if (event === 'data') handler(body);
+        if (event === 'end') handler();
+        return res;
+      },
+    };
+    cb(res);
+    return { on: jest.fn() };
+  });
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   delete process.env.RUNNER_TEMP;
+  delete process.env.GITHUB_TOKEN;
   mockRestoreCache.mockResolvedValue(undefined); // cache miss by default
   mockSaveCache.mockResolvedValue(0);
 });
@@ -80,37 +97,38 @@ describe('resolveHcVersion', () => {
   });
 
   test('fetches latest from GitHub when "latest" given', async () => {
-    const https = require('https');
-    https.get.mockImplementation((_opts: any, cb: any) => {
-      const res = {
-        on: (event: string, handler: any) => {
-          if (event === 'data') handler(JSON.stringify({ tag_name: 'v2.0.0' }));
-          if (event === 'end') handler();
-          return res;
-        },
-      };
-      cb(res);
-      return { on: jest.fn() };
-    });
-
+    mockGithubLatest(200, JSON.stringify({ tag_name: 'v2.0.0' }));
     await expect(resolveHcVersion('latest')).resolves.toBe('v2.0.0');
   });
 
   test('fetches latest when empty string given', async () => {
-    const https = require('https');
-    https.get.mockImplementation((_opts: any, cb: any) => {
-      const res = {
-        on: (event: string, handler: any) => {
-          if (event === 'data') handler(JSON.stringify({ tag_name: 'v2.0.0' }));
-          if (event === 'end') handler();
-          return res;
-        },
-      };
-      cb(res);
-      return { on: jest.fn() };
-    });
-
+    mockGithubLatest(200, JSON.stringify({ tag_name: 'v2.0.0' }));
     await expect(resolveHcVersion('')).resolves.toBe('v2.0.0');
+  });
+
+  test('sends GITHUB_TOKEN as Bearer when present', async () => {
+    process.env.GITHUB_TOKEN = 'ghs_test_token';
+    const https = require('https');
+    mockGithubLatest(200, JSON.stringify({ tag_name: 'v2.0.0' }));
+
+    await resolveHcVersion('latest');
+
+    expect(https.get).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer ghs_test_token',
+        }),
+      }),
+      expect.any(Function),
+    );
+    delete process.env.GITHUB_TOKEN;
+  });
+
+  test('fails clearly on non-200 GitHub API responses', async () => {
+    mockGithubLatest(403, '{"message":"API rate limit exceeded"}');
+    await expect(resolveHcVersion('latest')).rejects.toThrow(
+      /GitHub API \/releases\/latest returned 403/,
+    );
   });
 });
 

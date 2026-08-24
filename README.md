@@ -9,7 +9,7 @@ A GitHub Action that installs and authenticates the [Harness CLI (`hc`)](https:/
 
 ```yaml
 - name: Setup Harness CLI
-  uses: sameeksha-harness/setup-harness-cli@main
+  uses: sameeksha-harness/setup-harness-cli@v1
   with:
     api-url: https://app.harness.io
     account: ${{ secrets.HARNESS_ACCOUNT_ID }}
@@ -26,7 +26,7 @@ After `setup-harness-cli` runs, `hc` is on `PATH` and authenticated. Use it in a
 ### Upload multiple artifact types in one job
 
 ```yaml
-- uses: sameeksha-harness/setup-harness-cli@main
+- uses: sameeksha-harness/setup-harness-cli@v1
   with:
     api-url: https://app.harness.io
     account: ${{ secrets.HARNESS_ACCOUNT_ID }}
@@ -52,30 +52,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: sameeksha-harness/setup-harness-cli@main
+      - uses: sameeksha-harness/setup-harness-cli@v1
       - run: hc artifact push generic generictest test-artifact.txt --name test-artifact --version 1.0.0
 
   upload-rpm:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: sameeksha-harness/setup-harness-cli@main
+      - uses: sameeksha-harness/setup-harness-cli@v1
       - run: hc artifact push rpm rpmtest /tmp/test-package.rpm
 
   upload-python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: sameeksha-harness/setup-harness-cli@main
+      - uses: sameeksha-harness/setup-harness-cli@v1
       - run: hc artifact push python pythontest dist/my_pkg-1.0.0.whl
 ```
 
 > `hc` is cached by version and OS after the first install. Subsequent jobs restore from cache instead of downloading, keeping install time under 1 second.
 
-### Pin a specific CLI version
+### Use a specific CLI version
 
 ```yaml
-- uses: sameeksha-harness/setup-harness-cli@main
+- uses: sameeksha-harness/setup-harness-cli@v1
   with:
     api-url: https://app.harness.io
     account: ${{ secrets.HARNESS_ACCOUNT_ID }}
@@ -83,12 +83,14 @@ jobs:
     hc-version: v1.3.43
 ```
 
+By default the action installs `latest`. On GitHub-hosted runners it sends `GITHUB_TOKEN` when looking up that release so the GitHub API is less likely to rate-limit the call.
+
 ### Using the resolved version output
 
 ```yaml
 - name: Setup Harness CLI
   id: setup
-  uses: sameeksha-harness/setup-harness-cli@main
+  uses: sameeksha-harness/setup-harness-cli@v1
   with:
     api-url: https://app.harness.io
     account: ${{ secrets.HARNESS_ACCOUNT_ID }}
@@ -116,7 +118,7 @@ Credentials can be provided as action inputs or as environment variables. Inputs
 
 ## How it works
 
-1. **Resolves version** — if `hc-version` is `latest`, fetches the current release tag from the GitHub Releases API.
+1. **Resolves version** — if `hc-version` is `latest`, fetches the current release tag from the GitHub Releases API (authenticated with `GITHUB_TOKEN` when available).
 2. **Checks PATH** — if a matching `hc` version is already present, skips install entirely.
 3. **Restores cache** — checks `@actions/cache` for a cached binary (keyed by version + OS/arch). On a hit, restores in ~1 second with no download.
 4. **Installs** — on a cache miss, downloads `hc` via the official install script and saves to cache for future jobs.
