@@ -121,7 +121,7 @@ Credentials can be provided as action inputs or as environment variables. Inputs
 1. **Resolves version** — if `hc-version` is `latest`, fetches the current release tag from the GitHub Releases API (authenticated with `GITHUB_TOKEN` when available).
 2. **Checks PATH** — if a matching `hc` version is already present, skips install entirely.
 3. **Restores cache** — checks `@actions/cache` for a cached binary (keyed by version + OS/arch). On a hit, restores in ~1 second with no download.
-4. **Installs** — on a cache miss, downloads `hc` via the official install script and saves to cache for future jobs.
+4. **Installs** — on a cache miss, downloads the release tarball and `checksums.txt` directly from GitHub Releases, verifies the SHA-256 checksum, extracts the binary, and saves it to cache for future jobs.
 5. **Authenticates** — runs `hc auth login` with the provided credentials. The PAT token is masked before any logging.
 6. **Cleanup** — after the job finishes (even on failure), runs `hc auth logout` to remove credentials from the runner.
 
