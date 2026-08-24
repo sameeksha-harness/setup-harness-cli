@@ -1,7 +1,10 @@
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import { login, AuthInputs, ExecFn, ExecOptions } from './auth';
-import { ensureHc } from './install';
+import { ensureHc, MARKER_HC_VERSION } from './install';
+
+/** Env var used as a within-job marker so login runs only once per account per job. */
+const MARKER_LOGGED_IN = 'SETUP_HC_LOGGED_IN';
 
 /**
  * Reads an action input; falls back to an environment variable if the input is empty.
@@ -35,6 +38,13 @@ function buildExecFn(): ExecFn {
   };
 }
 
+async function verifyHcCommand(execFn: ExecFn): Promise<void> {
+  const { exitCode, stdout } = await execFn('hc', ['version'], { silent: true });
+  if (exitCode !== 0 || !stdout.includes('hc version')) {
+    throw new Error('hc is not usable after setup — "hc version" failed. Check PATH and installation.');
+  }
+}
+
 export async function run(): Promise<void> {
   try {
     const token = getInputOrEnv('token', 'HARNESS_PAT_TOKEN', true);
@@ -49,15 +59,25 @@ export async function run(): Promise<void> {
       token,
     };
 
-    core.startGroup('hc auth login');
-    try {
-      core.info(
-        `hc auth login --api-url ${inputs.apiUrl} --api-token *** --account ${inputs.account} --non-interactive`,
-      );
-      await login(inputs, buildExecFn());
-    } finally {
-      core.endGroup();
+    // Within-job login marker: skip auth if already logged in to this account.
+    const loginMarker = process.env[MARKER_LOGGED_IN];
+    if (loginMarker === inputs.account) {
+      core.info(`Already logged in to account ${inputs.account}, skipping`);
+    } else {
+      core.startGroup('hc auth login');
+      try {
+        core.info(
+          `hc auth login --api-url ${inputs.apiUrl} --api-token *** --account ${inputs.account} --non-interactive`,
+        );
+        await login(inputs, buildExecFn());
+        core.exportVariable(MARKER_LOGGED_IN, inputs.account);
+      } finally {
+        core.endGroup();
+      }
     }
+
+    // Verify hc is fully usable before reporting ready
+    await verifyHcCommand(buildExecFn());
 
     core.setOutput('hc-version', installedVersion);
     core.info(`Harness CLI (hc) ${installedVersion} is ready`);
@@ -70,3 +90,5 @@ export async function run(): Promise<void> {
 if (require.main === module) {
   run();
 }
+
+export { MARKER_HC_VERSION, MARKER_LOGGED_IN };

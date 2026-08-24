@@ -6,10 +6,13 @@ const mockExec = jest.fn();
 const mockRestoreCache = jest.fn();
 const mockSaveCache = jest.fn();
 
+const mockExportVariable = jest.fn();
+
 jest.mock('@actions/core', () => ({
-  info: (...args: unknown[]) => mockInfo(...args),
-  debug: (...args: unknown[]) => mockInfo(...args),
-  addPath: (...args: unknown[]) => mockAddPath(...args),
+  info:           (...args: unknown[]) => mockInfo(...args),
+  debug:          (...args: unknown[]) => mockInfo(...args),
+  addPath:        (...args: unknown[]) => mockAddPath(...args),
+  exportVariable: (...args: unknown[]) => mockExportVariable(...args),
 }));
 
 jest.mock('@actions/exec', () => ({

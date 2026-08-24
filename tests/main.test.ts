@@ -8,16 +8,18 @@ const mockInfo = jest.fn();
 const mockStartGroup = jest.fn();
 const mockEndGroup = jest.fn();
 const mockAddPath = jest.fn();
+const mockExportVariable = jest.fn();
 
 jest.mock('@actions/core', () => ({
-  getInput:    mockGetInput,
-  setOutput:   mockSetOutput,
-  setFailed:   mockSetFailed,
-  setSecret:   mockSetSecret,
-  info:        mockInfo,
-  startGroup:  mockStartGroup,
-  endGroup:    mockEndGroup,
-  addPath:     mockAddPath,
+  getInput:        mockGetInput,
+  setOutput:       mockSetOutput,
+  setFailed:       mockSetFailed,
+  setSecret:       mockSetSecret,
+  info:            mockInfo,
+  startGroup:      mockStartGroup,
+  endGroup:        mockEndGroup,
+  addPath:         mockAddPath,
+  exportVariable:  mockExportVariable,
 }));
 
 const mockExec = jest.fn();
@@ -71,6 +73,8 @@ function mockExecHappyPath() {
 beforeEach(() => {
   jest.resetModules();
   jest.clearAllMocks();
+  delete process.env.SETUP_HC_VERSION;
+  delete process.env.SETUP_HC_LOGGED_IN;
   // Reset cache mock after resetModules
   const cacheMock = require('@actions/cache');
   cacheMock.restoreCache = jest.fn().mockResolvedValue(undefined);
@@ -97,6 +101,70 @@ describe('main orchestration', () => {
     expect(authCall[2]).toEqual(expect.objectContaining({ silent: true }));
     expect(mockSetOutput).toHaveBeenCalledWith('hc-version', 'v1.3.43');
     expect(mockSetFailed).not.toHaveBeenCalled();
+  });
+
+  test('sets install and login markers after first run', async () => {
+    setupInputMock();
+    mockExecHappyPath();
+
+    await runModule();
+
+    expect(mockExportVariable).toHaveBeenCalledWith('SETUP_HC_VERSION', 'v1.3.43');
+    expect(mockExportVariable).toHaveBeenCalledWith('SETUP_HC_LOGGED_IN', 'acc-123');
+  });
+
+  test('skips install when SETUP_HC_VERSION marker is set', async () => {
+    setupInputMock();
+    process.env.SETUP_HC_VERSION = 'v1.3.43';
+    mockExecHappyPath();
+
+    await runModule();
+
+    expect(mockInfo).toHaveBeenCalledWith(expect.stringContaining('already installed in this job'));
+    // sh (install script) should never run
+    expect(mockExec.mock.calls.some((c: any[]) => c[0] === 'sh')).toBe(false);
+  });
+
+  test('skips login when SETUP_HC_LOGGED_IN marker matches account', async () => {
+    setupInputMock();
+    process.env.SETUP_HC_VERSION  = 'v1.3.43';
+    process.env.SETUP_HC_LOGGED_IN = 'acc-123';
+    mockExecHappyPath();
+
+    await runModule();
+
+    expect(mockInfo).toHaveBeenCalledWith(expect.stringContaining('Already logged in'));
+    expect(mockStartGroup).not.toHaveBeenCalled();
+  });
+
+  test('verifies hc is usable after setup (health check)', async () => {
+    setupInputMock();
+    mockExecHappyPath();
+
+    await runModule();
+
+    // hc version must be called as part of health check
+    const versionCalls = mockExec.mock.calls.filter(
+      (c: any[]) => c[0] === 'hc' && c[1][0] === 'version',
+    );
+    expect(versionCalls.length).toBeGreaterThanOrEqual(1);
+    expect(mockSetFailed).not.toHaveBeenCalled();
+  });
+
+  test('fails if hc is not usable after setup', async () => {
+    setupInputMock();
+    process.env.SETUP_HC_VERSION  = 'v1.3.43';
+    process.env.SETUP_HC_LOGGED_IN = 'acc-123';
+    mockExec.mockImplementation(async (cmd: string, args: string[], _opts: any) => {
+      if (cmd === 'hc' && args[0] === 'version') return 1; // health check fails
+      return 0;
+    });
+
+    await runModule();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('hc is not usable after setup'),
+    );
   });
 
   test('masks token before any exec call', async () => {
@@ -157,7 +225,6 @@ describe('main orchestration', () => {
   });
 
   test('uses env vars when action inputs are empty', async () => {
-    // Credential inputs empty — credentials come from env vars; hc-version still set
     mockGetInput.mockImplementation((name: string) =>
       name === 'hc-version' ? 'v1.3.43' : '',
     );

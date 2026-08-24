@@ -11,6 +11,9 @@ const INSTALL_SCRIPT_URL =
 
 const HC_VERSION_RE = /^v?\d+(\.[\w-]+)*$/;
 
+/** Env var used as a within-job marker so hc is only installed once per job. */
+export const MARKER_HC_VERSION = 'SETUP_HC_VERSION';
+
 export function normalizeHcVersion(version: string): string {
   const trimmed = version.trim();
   if (!HC_VERSION_RE.test(trimmed)) {
@@ -118,20 +121,27 @@ async function installHc(version: string, installDir: string): Promise<void> {
 }
 
 /**
- * Ensures hc is installed and on PATH.
- * - Skips install if PATH already has the right version.
- * - Restores from cross-job cache before downloading.
- * - Saves to cache after a fresh install.
- * Returns the resolved version string (e.g. "v1.3.43").
+ * Ensures hc is installed and on PATH exactly once per job.
+ * Uses SETUP_HC_VERSION as a job-scoped marker (set via core.exportVariable)
+ * so repeated calls within the same job are instant no-ops.
  */
 export async function ensureHc(requestedVersion = ''): Promise<string> {
   const version = await resolveHcVersion(requestedVersion);
+
+  // Within-job marker: if this version was already installed in an earlier step, skip everything.
+  const marker = process.env[MARKER_HC_VERSION];
+  if (marker === version) {
+    core.info(`hc ${version} already installed in this job, skipping`);
+    return version;
+  }
+
   const installDir = resolveInstallDir();
 
   if (await isHcOnPath()) {
     const current = await readHcVersionOutput();
     if (current && versionsMatch(current, version)) {
       core.info(`hc ${version} already on PATH, skipping install`);
+      core.exportVariable(MARKER_HC_VERSION, version);
       return version;
     }
     core.info(
@@ -163,6 +173,8 @@ export async function ensureHc(requestedVersion = ''): Promise<string> {
       `hc install completed but version mismatch: expected ${version}, got: ${installed.trim() || '(no output)'}`,
     );
   }
+
   core.info(`Using hc ${version}`);
+  core.exportVariable(MARKER_HC_VERSION, version);
   return version;
 }

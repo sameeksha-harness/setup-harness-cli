@@ -34410,11 +34410,16 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.MARKER_LOGGED_IN = exports.MARKER_HC_VERSION = void 0;
 exports.run = run;
 const core = __importStar(__nccwpck_require__(7484));
 const exec = __importStar(__nccwpck_require__(5236));
 const auth_1 = __nccwpck_require__(9081);
 const install_1 = __nccwpck_require__(232);
+Object.defineProperty(exports, "MARKER_HC_VERSION", ({ enumerable: true, get: function () { return install_1.MARKER_HC_VERSION; } }));
+/** Env var used as a within-job marker so login runs only once per account per job. */
+const MARKER_LOGGED_IN = 'SETUP_HC_LOGGED_IN';
+exports.MARKER_LOGGED_IN = MARKER_LOGGED_IN;
 /**
  * Reads an action input; falls back to an environment variable if the input is empty.
  * Throws if both are absent and the value is required.
@@ -34444,6 +34449,12 @@ function buildExecFn() {
         return { exitCode, stdout, stderr };
     };
 }
+async function verifyHcCommand(execFn) {
+    const { exitCode, stdout } = await execFn('hc', ['version'], { silent: true });
+    if (exitCode !== 0 || !stdout.includes('hc version')) {
+        throw new Error('hc is not usable after setup — "hc version" failed. Check PATH and installation.');
+    }
+}
 async function run() {
     try {
         const token = getInputOrEnv('token', 'HARNESS_PAT_TOKEN', true);
@@ -34455,14 +34466,24 @@ async function run() {
             account: getInputOrEnv('account', 'HARNESS_ACCOUNT_ID', true),
             token,
         };
-        core.startGroup('hc auth login');
-        try {
-            core.info(`hc auth login --api-url ${inputs.apiUrl} --api-token *** --account ${inputs.account} --non-interactive`);
-            await (0, auth_1.login)(inputs, buildExecFn());
+        // Within-job login marker: skip auth if already logged in to this account.
+        const loginMarker = process.env[MARKER_LOGGED_IN];
+        if (loginMarker === inputs.account) {
+            core.info(`Already logged in to account ${inputs.account}, skipping`);
         }
-        finally {
-            core.endGroup();
+        else {
+            core.startGroup('hc auth login');
+            try {
+                core.info(`hc auth login --api-url ${inputs.apiUrl} --api-token *** --account ${inputs.account} --non-interactive`);
+                await (0, auth_1.login)(inputs, buildExecFn());
+                core.exportVariable(MARKER_LOGGED_IN, inputs.account);
+            }
+            finally {
+                core.endGroup();
+            }
         }
+        // Verify hc is fully usable before reporting ready
+        await verifyHcCommand(buildExecFn());
         core.setOutput('hc-version', installedVersion);
         core.info(`Harness CLI (hc) ${installedVersion} is ready`);
     }
@@ -34517,6 +34538,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.MARKER_HC_VERSION = void 0;
 exports.normalizeHcVersion = normalizeHcVersion;
 exports.versionsMatch = versionsMatch;
 exports.fetchLatestHcVersion = fetchLatestHcVersion;
@@ -34531,6 +34553,8 @@ const os = __importStar(__nccwpck_require__(857));
 const path = __importStar(__nccwpck_require__(6928));
 const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/harness/harness-cli/v2/install';
 const HC_VERSION_RE = /^v?\d+(\.[\w-]+)*$/;
+/** Env var used as a within-job marker so hc is only installed once per job. */
+exports.MARKER_HC_VERSION = 'SETUP_HC_VERSION';
 function normalizeHcVersion(version) {
     const trimmed = version.trim();
     if (!HC_VERSION_RE.test(trimmed)) {
@@ -34628,19 +34652,24 @@ async function installHc(version, installDir) {
     core.addPath(installDir);
 }
 /**
- * Ensures hc is installed and on PATH.
- * - Skips install if PATH already has the right version.
- * - Restores from cross-job cache before downloading.
- * - Saves to cache after a fresh install.
- * Returns the resolved version string (e.g. "v1.3.43").
+ * Ensures hc is installed and on PATH exactly once per job.
+ * Uses SETUP_HC_VERSION as a job-scoped marker (set via core.exportVariable)
+ * so repeated calls within the same job are instant no-ops.
  */
 async function ensureHc(requestedVersion = '') {
     const version = await resolveHcVersion(requestedVersion);
+    // Within-job marker: if this version was already installed in an earlier step, skip everything.
+    const marker = process.env[exports.MARKER_HC_VERSION];
+    if (marker === version) {
+        core.info(`hc ${version} already installed in this job, skipping`);
+        return version;
+    }
     const installDir = resolveInstallDir();
     if (await isHcOnPath()) {
         const current = await readHcVersionOutput();
         if (current && versionsMatch(current, version)) {
             core.info(`hc ${version} already on PATH, skipping install`);
+            core.exportVariable(exports.MARKER_HC_VERSION, version);
             return version;
         }
         core.info(`hc on PATH does not match ${version} (got: ${current.trim() || 'unknown'}); reinstalling`);
@@ -34669,6 +34698,7 @@ async function ensureHc(requestedVersion = '') {
         throw new Error(`hc install completed but version mismatch: expected ${version}, got: ${installed.trim() || '(no output)'}`);
     }
     core.info(`Using hc ${version}`);
+    core.exportVariable(exports.MARKER_HC_VERSION, version);
     return version;
 }
 
