@@ -34654,8 +34654,10 @@ async function ensureHc(requestedVersion = '') {
     else {
         await installHc(version, installDir);
         try {
-            await cache.saveCache([installDir], key);
-            core.info(`Saved hc ${version} to cache`);
+            const cacheId = await cache.saveCache([installDir], key);
+            if (cacheId !== -1) {
+                core.info(`Saved hc ${version} to cache`);
+            }
         }
         catch (e) {
             // Cache save failures are non-fatal — next job will just reinstall
