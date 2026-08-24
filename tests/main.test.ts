@@ -63,7 +63,6 @@ jest.mock('os', () => ({
 const MOCK_BINARY = Buffer.from('mock hc binary content');
 const MOCK_HASH = crypto.createHash('sha256').update(MOCK_BINARY).digest('hex');
 const MOCK_CHECKSUMS_143 = `${MOCK_HASH}  hc_1.3.43_linux_x86_64.tar.gz\n`;
-const MOCK_CHECKSUMS_200 = `${MOCK_HASH}  hc_2.0.0_linux_x86_64.tar.gz\n`;
 
 function mockHashableStream() {
   const stream = {
@@ -77,7 +76,7 @@ function mockHashableStream() {
 }
 
 async function runModule(): Promise<void> {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const mod = require('../src/index');
   await mod.run();
 }
@@ -118,6 +117,7 @@ beforeEach(() => {
   // Skip install by default in orchestration tests; install.test.ts covers installHc thoroughly
   process.env.SETUP_HC_VERSION = 'v1.3.43';
   // Reset cache mock after resetModules
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const cacheMock = require('@actions/cache');
   cacheMock.restoreCache = jest.fn().mockResolvedValue(undefined);
   cacheMock.saveCache    = jest.fn().mockResolvedValue(0);
@@ -218,7 +218,7 @@ describe('main orchestration', () => {
   test('fails if hc is not usable after setup', async () => {
     setupInputMock();
     process.env.SETUP_HC_LOGGED_IN = 'acc-123@https://app.harness.io';
-    mockExec.mockImplementation(async (cmd: string, args: string[], _opts: any) => {
+    mockExec.mockImplementation(async (cmd: string, args: string[]) => {
       if (cmd === 'hc' && args[0] === 'version') return 1; // health check fails
       return 0;
     });
@@ -334,6 +334,7 @@ describe('main orchestration', () => {
     setupInputMock({ 'hc-version': 'latest' });
     // After resolving latest → v2.0.0, the marker must match to skip install
     process.env.SETUP_HC_VERSION = 'v2.0.0';
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const https = require('https');
     https.get.mockImplementation((_opts: any, cb: any) => {
       const res = {

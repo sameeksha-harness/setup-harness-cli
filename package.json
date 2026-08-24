@@ -9,7 +9,12 @@
     "lint": "eslint src tests --ext .ts",
     "all": "npm run build && npm test"
   },
-  "keywords": ["harness", "artifact-registry", "github-action", "harness-cli"],
+  "keywords": [
+    "harness",
+    "artifact-registry",
+    "github-action",
+    "harness-cli"
+  ],
   "license": "MIT",
   "dependencies": {
     "@actions/cache": "3.2.4",
@@ -20,8 +25,8 @@
   "devDependencies": {
     "@types/jest": "29.5.14",
     "@types/node": "20.19.43",
-    "@typescript-eslint/eslint-plugin": "7.18.0",
-    "@typescript-eslint/parser": "7.18.0",
+    "@typescript-eslint/eslint-plugin": "^8.67.0",
+    "@typescript-eslint/parser": "^8.67.0",
     "@vercel/ncc": "0.38.4",
     "eslint": "8.57.1",
     "jest": "29.7.0",

@@ -51,8 +51,8 @@ jest.mock('os', () => ({
   tmpdir:   () => '/tmp',
 }));
 
-const { normalizeHcVersion, versionsMatch, resolveHcVersion, ensureHc } =
-  require('../src/install');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { normalizeHcVersion, versionsMatch, resolveHcVersion, ensureHc } = require('../src/install');
 
 // Pre-compute a consistent mock binary hash for checksum tests
 const MOCK_BINARY = Buffer.from('mock hc binary content');
@@ -71,6 +71,7 @@ function mockHashableStream() {
 }
 
 function mockGithubLatest(statusCode: number, body: string) {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const https = require('https');
   https.get.mockImplementation((_opts: any, cb: any) => {
     const res = {
@@ -145,6 +146,7 @@ describe('resolveHcVersion', () => {
   });
 
   test('passes github-token as Bearer when provided', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const https = require('https');
     mockGithubLatest(200, JSON.stringify({ tag_name: 'v2.0.0' }));
 

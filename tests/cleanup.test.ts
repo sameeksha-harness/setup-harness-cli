@@ -11,7 +11,7 @@ jest.mock('@actions/exec', () => ({
   exec: (...args: unknown[]) => mockExec(...args),
 }));
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { cleanup } = require('../src/cleanup');
 
 beforeEach(() => {
