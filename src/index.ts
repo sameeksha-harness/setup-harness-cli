@@ -50,8 +50,11 @@ export async function run(): Promise<void> {
     const token = getInputOrEnv('token', 'HARNESS_PAT_TOKEN', true);
     core.setSecret(token);
 
+    const githubToken = core.getInput('github-token');
+    if (githubToken) core.setSecret(githubToken);
+
     const hcVersion = core.getInput('hc-version');
-    const installedVersion = await ensureHc(hcVersion);
+    const installedVersion = await ensureHc(hcVersion, githubToken);
 
     const inputs: AuthInputs = {
       apiUrl:  getInputOrEnv('api-url',  'HARNESS_URL',        true),
@@ -60,9 +63,12 @@ export async function run(): Promise<void> {
     };
 
     // Within-job login marker: skip auth if already logged in to this account.
+    // Marker includes both account and api-url so switching servers in the same
+    // job (e.g. prod → staging) still triggers a fresh login.
+    const loginMarkerValue = `${inputs.account}@${inputs.apiUrl}`;
     const loginMarker = process.env[MARKER_LOGGED_IN];
-    if (loginMarker === inputs.account) {
-      core.info(`Already logged in to account ${inputs.account}, skipping`);
+    if (loginMarker === loginMarkerValue) {
+      core.info(`Already logged in to ${inputs.account} at ${inputs.apiUrl}, skipping`);
     } else {
       core.startGroup('hc auth login');
       try {
@@ -70,7 +76,7 @@ export async function run(): Promise<void> {
           `hc auth login --api-url ${inputs.apiUrl} --api-token *** --account ${inputs.account} --non-interactive`,
         );
         await login(inputs, buildExecFn());
-        core.exportVariable(MARKER_LOGGED_IN, inputs.account);
+        core.exportVariable(MARKER_LOGGED_IN, loginMarkerValue);
       } finally {
         core.endGroup();
       }

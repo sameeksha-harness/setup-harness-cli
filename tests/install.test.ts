@@ -1,12 +1,17 @@
 export {};
 
+import * as crypto from 'crypto';
+
 const mockInfo = jest.fn();
 const mockAddPath = jest.fn();
+const mockExportVariable = jest.fn();
 const mockExec = jest.fn();
 const mockRestoreCache = jest.fn();
 const mockSaveCache = jest.fn();
-
-const mockExportVariable = jest.fn();
+const mockDownloadTool = jest.fn();
+const mockExtractTar = jest.fn();
+const mockReadFileSync = jest.fn();
+const mockCreateReadStream = jest.fn();
 
 jest.mock('@actions/core', () => ({
   info:           (...args: unknown[]) => mockInfo(...args),
@@ -21,21 +26,49 @@ jest.mock('@actions/exec', () => ({
 
 jest.mock('@actions/cache', () => ({
   restoreCache: (...args: unknown[]) => mockRestoreCache(...args),
-  saveCache: (...args: unknown[]) => mockSaveCache(...args),
+  saveCache:    (...args: unknown[]) => mockSaveCache(...args),
+}));
+
+jest.mock('@actions/tool-cache', () => ({
+  downloadTool: (...args: unknown[]) => mockDownloadTool(...args),
+  extractTar:   (...args: unknown[]) => mockExtractTar(...args),
 }));
 
 jest.mock('fs', () => ({
   ...jest.requireActual('fs'),
-  promises: { mkdir: jest.fn().mockResolvedValue(undefined) },
+  promises:         { mkdir: jest.fn().mockResolvedValue(undefined) },
+  readFileSync:     (...args: unknown[]) => mockReadFileSync(...args),
+  createReadStream: (...args: unknown[]) => mockCreateReadStream(...args),
 }));
 
-// Stub out the GitHub API call so tests don't hit the network
-jest.mock('https', () => ({
-  get: jest.fn(),
+jest.mock('https', () => ({ get: jest.fn() }));
+
+// Pin platform/arch so asset names are deterministic across dev and CI
+jest.mock('os', () => ({
+  ...jest.requireActual('os'),
+  platform: () => 'linux',
+  arch:     () => 'x64',
+  tmpdir:   () => '/tmp',
 }));
 
 const { normalizeHcVersion, versionsMatch, resolveHcVersion, ensureHc } =
   require('../src/install');
+
+// Pre-compute a consistent mock binary hash for checksum tests
+const MOCK_BINARY = Buffer.from('mock hc binary content');
+const MOCK_HASH = crypto.createHash('sha256').update(MOCK_BINARY).digest('hex');
+
+/** Makes createReadStream emit MOCK_BINARY so hashFile() returns MOCK_HASH. */
+function mockHashableStream() {
+  const stream = {
+    on(event: string, handler: any) {
+      if (event === 'data') setImmediate(() => handler(MOCK_BINARY));
+      if (event === 'end') setImmediate(() => handler());
+      return stream; // chainable: .on(...).on(...).on(...)
+    },
+  };
+  mockCreateReadStream.mockReturnValue(stream);
+}
 
 function mockGithubLatest(statusCode: number, body: string) {
   const https = require('https');
@@ -56,9 +89,11 @@ function mockGithubLatest(statusCode: number, body: string) {
 beforeEach(() => {
   jest.clearAllMocks();
   delete process.env.RUNNER_TEMP;
-  delete process.env.GITHUB_TOKEN;
-  mockRestoreCache.mockResolvedValue(undefined); // cache miss by default
+  delete process.env.SETUP_HC_VERSION;
+  mockRestoreCache.mockResolvedValue(undefined);
   mockSaveCache.mockResolvedValue(0);
+  mockDownloadTool.mockResolvedValue('/tmp/mock-download');
+  mockExtractTar.mockResolvedValue('/tmp/mock-extract');
 });
 
 describe('normalizeHcVersion', () => {
@@ -109,22 +144,18 @@ describe('resolveHcVersion', () => {
     await expect(resolveHcVersion('')).resolves.toBe('v2.0.0');
   });
 
-  test('sends GITHUB_TOKEN as Bearer when present', async () => {
-    process.env.GITHUB_TOKEN = 'ghs_test_token';
+  test('passes github-token as Bearer when provided', async () => {
     const https = require('https');
     mockGithubLatest(200, JSON.stringify({ tag_name: 'v2.0.0' }));
 
-    await resolveHcVersion('latest');
+    await resolveHcVersion('latest', 'ghs_test_token');
 
     expect(https.get).toHaveBeenCalledWith(
       expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: 'Bearer ghs_test_token',
-        }),
+        headers: expect.objectContaining({ Authorization: 'Bearer ghs_test_token' }),
       }),
       expect.any(Function),
     );
-    delete process.env.GITHUB_TOKEN;
   });
 
   test('fails clearly on non-200 GitHub API responses', async () => {
@@ -136,6 +167,17 @@ describe('resolveHcVersion', () => {
 });
 
 describe('ensureHc', () => {
+  test('skips install when SETUP_HC_VERSION marker matches', async () => {
+    process.env.SETUP_HC_VERSION = 'v1.3.43';
+
+    const version = await ensureHc('v1.3.43');
+
+    expect(version).toBe('v1.3.43');
+    expect(mockDownloadTool).not.toHaveBeenCalled();
+    expect(mockExec).not.toHaveBeenCalled();
+    expect(mockInfo).toHaveBeenCalledWith(expect.stringContaining('already installed in this job'));
+  });
+
   test('skips install when PATH hc matches requested version', async () => {
     mockExec.mockImplementation(async (cmd: string, args: string[], opts: any) => {
       if (cmd === 'which') return 0;
@@ -149,12 +191,12 @@ describe('ensureHc', () => {
     const version = await ensureHc('v1.3.43');
 
     expect(version).toBe('v1.3.43');
-    expect(mockExec.mock.calls.some((c: any[]) => c[0] === 'sh')).toBe(false);
-    expect(mockRestoreCache).not.toHaveBeenCalled();
+    expect(mockDownloadTool).not.toHaveBeenCalled();
     expect(mockInfo).toHaveBeenCalledWith(expect.stringContaining('already on PATH'));
+    expect(mockExportVariable).toHaveBeenCalledWith('SETUP_HC_VERSION', 'v1.3.43');
   });
 
-  test('restores from cache when available (no download)', async () => {
+  test('restores from cache — no download', async () => {
     mockExec.mockImplementation(async (cmd: string, args: string[], opts: any) => {
       if (cmd === 'which') return 1;
       if (cmd === 'hc' && args[0] === 'version') {
@@ -163,44 +205,70 @@ describe('ensureHc', () => {
       }
       throw new Error(`unexpected: ${cmd} ${args}`);
     });
-    mockRestoreCache.mockResolvedValue('setup-hc-v1.3.43-linux-arm64');
+    mockRestoreCache.mockResolvedValue('setup-hc-v1.3.43-linux-x64');
 
     await ensureHc('v1.3.43');
 
-    expect(mockExec.mock.calls.some((c: any[]) => c[0] === 'sh')).toBe(false);
+    expect(mockDownloadTool).not.toHaveBeenCalled();
     expect(mockAddPath).toHaveBeenCalled();
     expect(mockSaveCache).not.toHaveBeenCalled();
     expect(mockInfo).toHaveBeenCalledWith(expect.stringContaining('Restored'));
   });
 
-  test('installs and saves cache on cache miss', async () => {
+  test('downloads, verifies SHA-256, extracts on cache miss', async () => {
     mockExec.mockImplementation(async (cmd: string, args: string[], opts: any) => {
       if (cmd === 'which') return 1;
-      if (cmd === 'sh') return 0;
       if (cmd === 'hc' && args[0] === 'version') {
         opts?.listeners?.stdout?.(Buffer.from('hc version 1.3.43\n'));
         return 0;
       }
       throw new Error(`unexpected: ${cmd} ${args}`);
     });
+    // checksums.txt contains the hash of our mock binary
+    mockReadFileSync.mockReturnValue(`${MOCK_HASH}  hc_1.3.43_linux_x86_64.tar.gz\n`);
+    mockHashableStream();
 
     await ensureHc('v1.3.43');
 
-    expect(mockExec.mock.calls.some((c: any[]) => c[0] === 'sh')).toBe(true);
+    expect(mockDownloadTool).toHaveBeenCalledTimes(2); // tarball + checksums
+    expect(mockDownloadTool).toHaveBeenCalledWith(
+      expect.stringContaining('hc_1.3.43_linux_x86_64.tar.gz'),
+    );
+    expect(mockDownloadTool).toHaveBeenCalledWith(
+      expect.stringContaining('checksums.txt'),
+    );
+    expect(mockExtractTar).toHaveBeenCalled();
     expect(mockSaveCache).toHaveBeenCalled();
-    expect(mockAddPath).toHaveBeenCalled();
+    expect(mockInfo).toHaveBeenCalledWith(expect.stringContaining('SHA-256 verified'));
+  });
+
+  test('rejects tampered binary (SHA-256 mismatch)', async () => {
+    mockExec.mockImplementation(async (cmd: string, args: string[], opts: any) => {
+      if (cmd === 'which') return 1;
+      if (cmd === 'hc' && args[0] === 'version') {
+        opts?.listeners?.stdout?.(Buffer.from('hc version 1.3.43\n'));
+        return 0;
+      }
+      return 0;
+    });
+    // checksums.txt has a different hash than what the binary produces
+    mockReadFileSync.mockReturnValue(`deadbeef00000000000000000000000000000000000000000000000000000000  hc_1.3.43_linux_x86_64.tar.gz\n`);
+    mockHashableStream();
+
+    await expect(ensureHc('v1.3.43')).rejects.toThrow(/SHA-256 mismatch/);
   });
 
   test('fails if post-install version does not match', async () => {
     mockExec.mockImplementation(async (cmd: string, args: string[], opts: any) => {
       if (cmd === 'which') return 1;
-      if (cmd === 'sh') return 0;
       if (cmd === 'hc' && args[0] === 'version') {
         opts?.listeners?.stdout?.(Buffer.from('hc version 9.9.9\n'));
         return 0;
       }
-      throw new Error(`unexpected: ${cmd} ${args}`);
+      return 0;
     });
+    mockReadFileSync.mockReturnValue(`${MOCK_HASH}  hc_1.3.43_linux_x86_64.tar.gz\n`);
+    mockHashableStream();
 
     await expect(ensureHc('v1.3.43')).rejects.toThrow(/version mismatch/);
   });
@@ -208,13 +276,14 @@ describe('ensureHc', () => {
   test('continues if cache save fails', async () => {
     mockExec.mockImplementation(async (cmd: string, args: string[], opts: any) => {
       if (cmd === 'which') return 1;
-      if (cmd === 'sh') return 0;
       if (cmd === 'hc' && args[0] === 'version') {
         opts?.listeners?.stdout?.(Buffer.from('hc version 1.3.43\n'));
         return 0;
       }
-      throw new Error(`unexpected: ${cmd} ${args}`);
+      return 0;
     });
+    mockReadFileSync.mockReturnValue(`${MOCK_HASH}  hc_1.3.43_linux_x86_64.tar.gz\n`);
+    mockHashableStream();
     mockSaveCache.mockRejectedValue(new Error('cache quota exceeded'));
 
     await expect(ensureHc('v1.3.43')).resolves.toBe('v1.3.43');

@@ -1,13 +1,12 @@
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import * as cache from '@actions/cache';
+import * as tc from '@actions/tool-cache';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
-
-const INSTALL_SCRIPT_URL =
-  'https://raw.githubusercontent.com/harness/harness-cli/v2/install';
 
 const HC_VERSION_RE = /^v?\d+(\.[\w-]+)*$/;
 
@@ -31,19 +30,15 @@ export function versionsMatch(versionOutput: string, expected: string): boolean 
   return match[1].replace(/^v/, '') === want;
 }
 
-export function fetchLatestHcVersion(): Promise<string> {
+export function fetchLatestHcVersion(githubToken?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const headers: Record<string, string> = {
       'User-Agent': 'setup-harness-cli',
       Accept: 'application/vnd.github+json',
     };
-    // GITHUB_TOKEN is set automatically on GitHub-hosted runners and avoids
-    // unauthenticated rate limits (403) on /releases/latest.
-    const token = process.env.GITHUB_TOKEN;
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
+    if (githubToken) {
+      headers.Authorization = `Bearer ${githubToken}`;
     }
-
     const options = {
       hostname: 'api.github.com',
       path: '/repos/harness/harness-cli/releases/latest',
@@ -67,15 +62,15 @@ export function fetchLatestHcVersion(): Promise<string> {
           reject(new Error(`Failed to parse GitHub API response: ${e}`));
         }
       });
-    }).on('error', (e) => reject(new Error(`GitHub API request failed: ${e.message}`)));
+    }).on('error', (e: Error) => reject(new Error(`GitHub API request failed: ${e.message}`)));
   });
 }
 
-export async function resolveHcVersion(requested: string): Promise<string> {
+export async function resolveHcVersion(requested: string, githubToken?: string): Promise<string> {
   const trimmed = requested.trim().toLowerCase();
   if (!trimmed || trimmed === 'latest') {
     core.info('Resolving latest hc version from GitHub...');
-    const tag = await fetchLatestHcVersion();
+    const tag = await fetchLatestHcVersion(githubToken);
     core.info(`Latest hc version: ${tag}`);
     return tag;
   }
@@ -89,6 +84,28 @@ function resolveInstallDir(): string {
 
 function cacheKey(version: string): string {
   return `setup-hc-${version}-${os.platform()}-${os.arch()}`;
+}
+
+function mapPlatform(platform: string): string {
+  if (platform === 'darwin') return 'darwin';
+  if (platform === 'win32') return 'windows';
+  return 'linux';
+}
+
+function mapArch(arch: string): string {
+  if (arch === 'x64') return 'x86_64';
+  if (arch === 'arm64') return 'arm64';
+  throw new Error(`Unsupported architecture: ${arch}. Supported: x64, arm64`);
+}
+
+function hashFile(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    fs.createReadStream(filePath)
+      .on('data', (chunk) => hash.update(chunk))
+      .on('end', () => resolve(hash.digest('hex')))
+      .on('error', reject);
+  });
 }
 
 async function isHcOnPath(): Promise<boolean> {
@@ -110,13 +127,38 @@ async function readHcVersionOutput(): Promise<string> {
 }
 
 async function installHc(version: string, installDir: string): Promise<void> {
+  const platform = mapPlatform(os.platform());
+  const arch = mapArch(os.arch());
+  const ver = version.replace(/^v/, '');
+  const assetName = `hc_${ver}_${platform}_${arch}.tar.gz`;
+  const baseUrl = `https://github.com/harness/harness-cli/releases/download/${version}`;
+
+  core.info(`Downloading hc ${version} (${platform}/${arch})...`);
+
+  // Download tarball and checksums concurrently
+  const [tarPath, checksumsPath] = await Promise.all([
+    tc.downloadTool(`${baseUrl}/${assetName}`),
+    tc.downloadTool(`${baseUrl}/checksums.txt`),
+  ]);
+
+  // Verify SHA-256 before executing anything
+  const checksums = fs.readFileSync(checksumsPath, 'utf8');
+  const expectedLine = checksums.split('\n').find((l) => l.includes(assetName));
+  if (!expectedLine) {
+    throw new Error(`No checksum entry found for ${assetName} in checksums.txt`);
+  }
+  const expectedHash = expectedLine.trim().split(/\s+/)[0];
+  const actualHash = await hashFile(tarPath);
+  if (actualHash !== expectedHash) {
+    throw new Error(
+      `SHA-256 mismatch for ${assetName}: expected ${expectedHash}, got ${actualHash}`,
+    );
+  }
+  core.info(`SHA-256 verified for ${assetName}`);
+
+  // Extract and add to PATH
   await fs.promises.mkdir(installDir, { recursive: true });
-  core.info(`Installing harness CLI (hc) ${version} into ${installDir}`);
-  const script = [
-    `curl -fsSL ${INSTALL_SCRIPT_URL}`,
-    `| INSTALL_DIR='${installDir}' HC_VERSION='${version}' sh`,
-  ].join(' ');
-  await exec.exec('sh', ['-c', script]);
+  await tc.extractTar(tarPath, installDir);
   core.addPath(installDir);
 }
 
@@ -125,8 +167,8 @@ async function installHc(version: string, installDir: string): Promise<void> {
  * Uses SETUP_HC_VERSION as a job-scoped marker (set via core.exportVariable)
  * so repeated calls within the same job are instant no-ops.
  */
-export async function ensureHc(requestedVersion = ''): Promise<string> {
-  const version = await resolveHcVersion(requestedVersion);
+export async function ensureHc(requestedVersion = '', githubToken?: string): Promise<string> {
+  const version = await resolveHcVersion(requestedVersion, githubToken);
 
   // Within-job marker: if this version was already installed in an earlier step, skip everything.
   const marker = process.env[MARKER_HC_VERSION];
