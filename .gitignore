@@ -4,3 +4,5 @@ coverage/
 .idea/
 *.log
 .env.local
+dist/*.map
+dist-cleanup/
