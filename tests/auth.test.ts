@@ -19,9 +19,29 @@ describe('login', () => {
 
     expect(execFn).toHaveBeenCalledWith(
       'hc',
-      ['auth', 'login', '--api-url', 'https://app.harness.io', '--api-token', 'pat.acc-123.secret', '--account', 'acc-123', '--non-interactive'],
+      ['auth', 'login', '--api-url', 'https://app.harness.io', '--account', 'acc-123', '--api-token', 'pat.acc-123.secret', '--non-interactive'],
       { silent: true },
     );
+  });
+
+  test('includes --org and --project when provided', async () => {
+    const execFn = makeExecFn(0);
+    await login({ ...INPUTS, org: 'my-org', project: 'my-project' }, execFn);
+
+    expect(execFn).toHaveBeenCalledWith(
+      'hc',
+      ['auth', 'login', '--api-url', 'https://app.harness.io', '--account', 'acc-123', '--api-token', 'pat.acc-123.secret', '--non-interactive', '--org', 'my-org', '--project', 'my-project'],
+      { silent: true },
+    );
+  });
+
+  test('omits --org and --project when not provided', async () => {
+    const execFn = makeExecFn(0);
+    await login(INPUTS, execFn);
+
+    const args = (execFn as jest.Mock).mock.calls[0][1] as string[];
+    expect(args).not.toContain('--org');
+    expect(args).not.toContain('--project');
   });
 
   test('resolves on exit code 0', async () => {

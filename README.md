@@ -1,114 +1,116 @@
-# GitHub Action to Setup Harness CLI
+# Setup Harness CLI
 
 [![CI](https://github.com/sameeksha-harness/setup-harness-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/sameeksha-harness/setup-harness-cli/actions/workflows/ci.yml)
-[![license badge](https://img.shields.io/github/license/sameeksha-harness/setup-harness-cli)](./LICENSE)
 
-A GitHub Action that installs and authenticates the [Harness CLI (`hc`)](https://github.com/harness/harness-cli) so you can run `hc` commands directly in subsequent workflow steps.
+A GitHub Action that installs and authenticates the [Harness CLI (`hc`)](https://github.com/harness/harness-cli). After this action runs, `hc` is on `PATH` and authenticated — use **any `hc` command** in subsequent steps.
 
-## Usage
+## Prerequisites
+
+- A Harness account
+- A Harness Personal Access Token (PAT) stored as a GitHub secret
+
+## Quick Start
 
 ```yaml
-- name: Setup Harness CLI
-  uses: sameeksha-harness/setup-harness-cli@v1
-  with:
-    api-url: https://app.harness.io
-    account: ${{ secrets.HARNESS_ACCOUNT_ID }}
-    token: ${{ secrets.HARNESS_PAT_TOKEN }}
+steps:
+  - uses: actions/checkout@v4
 
-- name: Upload artifact
-  run: hc artifact push generic my-registry ./artifact.tar.gz --name my-artifact --version ${{ github.sha }}
+  - name: Setup Harness CLI
+    uses: sameeksha-harness/setup-harness-cli@v1
+    with:
+      api-url: ${{ secrets.HARNESS_URL }}
+      account: ${{ secrets.HARNESS_ACCOUNT_ID }}
+      token: ${{ secrets.HARNESS_PAT_TOKEN }}
+
+  - name: Push artifact
+    run: hc artifact push generic my-registry build.tar.gz --name my-app --version ${{ github.sha }}
 ```
-
-After `setup-harness-cli` runs, `hc` is on `PATH` and authenticated. Use **any `hc` command** in subsequent `run:` steps — artifact push, pipeline triggers, service management, or anything else the Harness CLI supports.
 
 ## Examples
 
-### Upload multiple artifact types in one job
+### Push multiple artifact types
 
 ```yaml
 - uses: sameeksha-harness/setup-harness-cli@v1
   with:
-    api-url: https://app.harness.io
+    api-url: ${{ secrets.HARNESS_URL }}
     account: ${{ secrets.HARNESS_ACCOUNT_ID }}
     token: ${{ secrets.HARNESS_PAT_TOKEN }}
 
 - run: hc artifact push generic my-registry build.tar.gz --name my-app --version 1.0.0
 - run: hc artifact push python my-registry dist/my_pkg-1.0.0.whl
 - run: hc artifact push npm my-registry my-pkg-1.0.0.tgz
+- run: hc artifact push rpm my-registry package.rpm
 ```
 
-### Using environment variables (set once, reuse across jobs)
+### Reuse credentials across multiple jobs
 
-Set credentials at the workflow level so every job picks them up without repeating `with:`:
+Set credentials once at the workflow level using environment variables so every job picks them up without repeating `with:`:
 
 ```yaml
 env:
-  HARNESS_URL:        https://app.harness.io
+  HARNESS_URL:        ${{ secrets.HARNESS_URL }}
   HARNESS_ACCOUNT_ID: ${{ secrets.HARNESS_ACCOUNT_ID }}
   HARNESS_PAT_TOKEN:  ${{ secrets.HARNESS_PAT_TOKEN }}
 
 jobs:
-  upload-generic:
+  build-and-push:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: sameeksha-harness/setup-harness-cli@v1
-      - run: hc artifact push generic generictest test-artifact.txt --name test-artifact --version 1.0.0
+      - run: hc artifact push generic my-registry build.tar.gz --name my-app --version 1.0.0
 
-  upload-rpm:
+  publish-python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: sameeksha-harness/setup-harness-cli@v1
-      - run: hc artifact push rpm rpmtest /tmp/test-package.rpm
-
-  upload-python:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: sameeksha-harness/setup-harness-cli@v1
-      - run: hc artifact push python pythontest dist/my_pkg-1.0.0.whl
+      - run: hc artifact push python my-registry dist/my_pkg-1.0.0.whl
 ```
 
-> `hc` is cached by version and OS after the first install. Subsequent jobs restore from cache instead of downloading, keeping install time under 1 second.
+> **Note:** `hc` is installed once and cached by version + OS. Subsequent jobs restore the binary from cache instead of downloading it again.
 
-### Use a specific CLI version
+### Pin to a specific CLI version
 
 ```yaml
 - uses: sameeksha-harness/setup-harness-cli@v1
   with:
-    api-url: https://app.harness.io
+    api-url: ${{ secrets.HARNESS_URL }}
     account: ${{ secrets.HARNESS_ACCOUNT_ID }}
     token: ${{ secrets.HARNESS_PAT_TOKEN }}
     hc-version: v1.3.43
 ```
 
-By default the action installs `latest`. On GitHub-hosted runners it sends `GITHUB_TOKEN` when looking up that release so the GitHub API is less likely to rate-limit the call.
+Omit `hc-version` (or set it to `latest`) to always install the latest release.
 
-### Using the resolved version output
+### Use the resolved version in later steps
 
 ```yaml
 - name: Setup Harness CLI
   id: setup
   uses: sameeksha-harness/setup-harness-cli@v1
   with:
-    api-url: https://app.harness.io
+    api-url: ${{ secrets.HARNESS_URL }}
     account: ${{ secrets.HARNESS_ACCOUNT_ID }}
     token: ${{ secrets.HARNESS_PAT_TOKEN }}
 
-- run: echo "Using hc ${{ steps.setup.outputs.hc-version }}"
+- run: echo "Running with hc ${{ steps.setup.outputs.hc-version }}"
 ```
 
 ## Inputs
 
-Credentials can be provided as action inputs or as environment variables. Inputs take precedence if both are set.
+Credentials can be provided as action inputs or as environment variables. Inputs take precedence when both are set.
 
 | Input | Env var | Required | Default | Description |
 |-------|---------|----------|---------|-------------|
-| `api-url` | `HARNESS_URL` | yes | — | Harness API base URL. No trailing slash (e.g. `https://app.harness.io`). |
+| `api-url` | `HARNESS_URL` | yes | — | Harness API base URL, no trailing slash. |
 | `account` | `HARNESS_ACCOUNT_ID` | yes | — | Harness account ID. |
 | `token` | `HARNESS_PAT_TOKEN` | yes | — | Harness PAT token. Always pass via `${{ secrets.* }}` — the action masks it from logs automatically. |
-| `hc-version` | — | no | `latest` | Harness CLI release tag to install (e.g. `v1.3.43`). Defaults to the latest release. If the requested version is already on `PATH`, install is skipped. |
+| `org` | `HARNESS_ORG_ID` | no | — | Harness organization ID. |
+| `project` | `HARNESS_PROJECT_ID` | no | — | Harness project ID. |
+| `hc-version` | — | no | `latest` | Harness CLI release tag to install (e.g. `v1.3.43`). Defaults to the latest release. |
+| `github-token` | — | no | `${{ github.token }}` | Token used to call the GitHub API when resolving the latest `hc` release. The default workflow token is sufficient. |
 
 ## Outputs
 
@@ -118,38 +120,24 @@ Credentials can be provided as action inputs or as environment variables. Inputs
 
 ## How it works
 
-1. **Resolves version** — if `hc-version` is `latest`, fetches the current release tag from the GitHub Releases API (authenticated with `GITHUB_TOKEN` when available).
-2. **Checks PATH** — if a matching `hc` version is already present, skips install entirely.
-3. **Restores cache** — checks `@actions/cache` for a cached binary (keyed by version + OS/arch). On a hit, restores in ~1 second with no download.
-4. **Installs** — on a cache miss, downloads the release tarball and `checksums.txt` directly from GitHub Releases, verifies the SHA-256 checksum, extracts the binary, and saves it to cache for future jobs.
+1. **Resolves version** — if `hc-version` is `latest`, fetches the current release tag from the GitHub Releases API.
+2. **Checks PATH** — if a matching `hc` version is already on `PATH`, skips install entirely.
+3. **Restores cache** — looks for a cached binary keyed by version + OS/arch. On a hit, restores without downloading again.
+4. **Installs** — on a cache miss, downloads the release tarball from GitHub Releases, verifies the SHA-256 checksum against the published `checksums.txt`, then extracts and caches the binary.
 5. **Authenticates** — runs `hc auth login` with the provided credentials. The PAT token is masked before any logging.
-6. **Cleanup** — after the job finishes (even on failure), runs `hc auth logout` to remove credentials from the runner.
+6. **Health check** — runs `hc version` to confirm the CLI is usable before reporting ready.
+7. **Cleanup** — after the job finishes (even on failure), runs `hc auth logout` to remove stored credentials from the runner.
+
+## Security
+
+- The PAT token is masked via `core.setSecret` before any command runs — it will never appear in logs.
+- The `hc` binary is verified against a SHA-256 checksum published alongside the release before it is executed.
+- Credentials are automatically removed from the runner at the end of each job via the post-step cleanup.
 
 ## Contributing
 
-### Setup
+Refer to [CONTRIBUTING.md](https://github.com/harness/harness/blob/main/CONTRIBUTING.md).
 
-```bash
-npm install
-```
+## License
 
-### Test
-
-```bash
-npm test
-```
-
-### Build
-
-```bash
-npm run build
-# Produces dist/index.js and dist/cleanup.js — commit alongside source changes.
-```
-
-### Architecture
-
-- `src/install.ts` — resolves, caches, and installs `hc`. Handles `latest` resolution via GitHub API and cross-job caching via `@actions/cache`.
-- `src/auth.ts` — pure login logic (`hc auth login`). No `@actions/*` imports, independently unit-testable.
-- `src/index.ts` — wires `@actions/core` and `@actions/exec` to `install.ts` and `auth.ts`. Entry point for the main action step.
-- `src/cleanup.ts` — runs `hc auth logout`. Entry point for the post-job cleanup step.
-- `@vercel/ncc` bundles each entry point into a single file so `node_modules/` does not need to be committed.
+Apache License 2.0 — see [LICENSE](https://github.com/harness/harness/blob/main/LICENSE).

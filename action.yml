@@ -15,6 +15,12 @@ inputs:
   token:
     description: 'Harness PAT token. Always pass via a secret. Can also be set via the HARNESS_PAT_TOKEN environment variable.'
     required: false
+  org:
+    description: 'Harness organization ID (optional). Can also be set via the HARNESS_ORG_ID environment variable.'
+    required: false
+  project:
+    description: 'Harness project ID (optional). Can also be set via the HARNESS_PROJECT_ID environment variable.'
+    required: false
   hc-version:
     description: 'Harness CLI (hc) release tag to install (e.g. v1.3.43). Defaults to latest.'
     required: false

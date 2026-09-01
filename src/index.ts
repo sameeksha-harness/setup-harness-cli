@@ -57,24 +57,29 @@ export async function run(): Promise<void> {
     const installedVersion = await ensureHc(hcVersion, githubToken);
 
     const inputs: AuthInputs = {
-      apiUrl:  getInputOrEnv('api-url',  'HARNESS_URL',        true),
-      account: getInputOrEnv('account',  'HARNESS_ACCOUNT_ID', true),
+      apiUrl:   getInputOrEnv('api-url', 'HARNESS_URL',        true),
+      account:  getInputOrEnv('account', 'HARNESS_ACCOUNT_ID', true),
       token,
+      org:      getInputOrEnv('org',     'HARNESS_ORG_ID')     || undefined,
+      project:  getInputOrEnv('project', 'HARNESS_PROJECT_ID') || undefined,
     };
 
-    // Within-job login marker: skip auth if already logged in to this account.
-    // Marker includes both account and api-url so switching servers in the same
-    // job (e.g. prod → staging) still triggers a fresh login.
-    const loginMarkerValue = `${inputs.account}@${inputs.apiUrl}`;
+    // Within-job login marker: skip auth if already logged in to the same server.
+    // Marker includes api-url so switching servers triggers a fresh login.
+    const loginMarkerValue = inputs.apiUrl;
     const loginMarker = process.env[MARKER_LOGGED_IN];
     if (loginMarker === loginMarkerValue) {
-      core.info(`Already logged in to ${inputs.account} at ${inputs.apiUrl}, skipping`);
+      core.info(`Already logged in at ${inputs.apiUrl}, skipping`);
     } else {
       core.startGroup('hc auth login');
       try {
-        core.info(
-          `hc auth login --api-url ${inputs.apiUrl} --api-token *** --account ${inputs.account} --non-interactive`,
-        );
+        const redactedCmd = [
+          `hc auth login --api-url ${inputs.apiUrl} --account ${inputs.account} --api-token ***`,
+          inputs.org     ? `--org ${inputs.org}`         : '',
+          inputs.project ? `--project ${inputs.project}` : '',
+          '--non-interactive',
+        ].filter(Boolean).join(' ');
+        core.info(redactedCmd);
         await login(inputs, buildExecFn());
         core.exportVariable(MARKER_LOGGED_IN, loginMarkerValue);
       } finally {

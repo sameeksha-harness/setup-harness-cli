@@ -136,8 +136,8 @@ describe('main orchestration', () => {
     expect(authCall[1]).toEqual([
       'auth', 'login',
       '--api-url', 'https://app.harness.io',
-      '--api-token', 'pat.acc-123.secret',
       '--account', 'acc-123',
+      '--api-token', 'pat.acc-123.secret',
       '--non-interactive',
     ]);
     expect(authCall[2]).toEqual(expect.objectContaining({ silent: true }));
@@ -164,7 +164,7 @@ describe('main orchestration', () => {
     await runModule();
 
     expect(mockExportVariable).toHaveBeenCalledWith('SETUP_HC_VERSION', 'v1.3.43');
-    expect(mockExportVariable).toHaveBeenCalledWith('SETUP_HC_LOGGED_IN', 'acc-123@https://app.harness.io');
+    expect(mockExportVariable).toHaveBeenCalledWith('SETUP_HC_LOGGED_IN', 'https://app.harness.io');
   });
 
   test('skips install when SETUP_HC_VERSION marker is set', async () => {
@@ -178,9 +178,9 @@ describe('main orchestration', () => {
     expect(mockSetFailed).not.toHaveBeenCalled();
   });
 
-  test('skips login when SETUP_HC_LOGGED_IN marker matches account + api-url', async () => {
+  test('skips login when SETUP_HC_LOGGED_IN marker matches api-url', async () => {
     setupInputMock();
-    process.env.SETUP_HC_LOGGED_IN = 'acc-123@https://app.harness.io';
+    process.env.SETUP_HC_LOGGED_IN = 'https://app.harness.io';
     mockExecHappyPath();
 
     await runModule();
@@ -189,10 +189,10 @@ describe('main orchestration', () => {
     expect(mockStartGroup).not.toHaveBeenCalled();
   });
 
-  test('does not skip login when same account but different api-url', async () => {
+  test('does not skip login when api-url differs', async () => {
     setupInputMock({ 'api-url': 'https://staging.harness.io' });
     // marker was set for prod, but now we're talking to staging
-    process.env.SETUP_HC_LOGGED_IN = 'acc-123@https://app.harness.io';
+    process.env.SETUP_HC_LOGGED_IN = 'https://app.harness.io';
     mockExecHappyPath();
 
     await runModule();
@@ -217,7 +217,7 @@ describe('main orchestration', () => {
 
   test('fails if hc is not usable after setup', async () => {
     setupInputMock();
-    process.env.SETUP_HC_LOGGED_IN = 'acc-123@https://app.harness.io';
+    process.env.SETUP_HC_LOGGED_IN = 'https://app.harness.io';
     mockExec.mockImplementation(async (cmd: string, args: string[]) => {
       if (cmd === 'hc' && args[0] === 'version') return 1; // health check fails
       return 0;
@@ -288,7 +288,7 @@ describe('main orchestration', () => {
       name === 'hc-version' ? 'v1.3.43' : '',
     );
     process.env.HARNESS_URL        = 'https://env.harness.io';
-    process.env.HARNESS_ACCOUNT_ID = 'env-account';
+    process.env.HARNESS_ACCOUNT_ID = 'acc-env';
     process.env.HARNESS_PAT_TOKEN  = 'pat.env.token';
     mockExecHappyPath();
 
@@ -303,7 +303,6 @@ describe('main orchestration', () => {
       (c: any[]) => c[0] === 'hc' && c[1][0] === 'auth',
     );
     expect(authCall[1]).toContain('https://env.harness.io');
-    expect(authCall[1]).toContain('env-account');
     expect(mockSetFailed).not.toHaveBeenCalled();
   });
 

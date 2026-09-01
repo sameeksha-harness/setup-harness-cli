@@ -2,6 +2,8 @@ export interface AuthInputs {
   apiUrl: string;
   account: string;
   token: string;
+  org?: string;
+  project?: string;
 }
 
 export interface ExecResult {
@@ -29,17 +31,17 @@ function redact(text: string, secret: string): string {
 }
 
 export async function login(inputs: AuthInputs, execFn: ExecFn): Promise<void> {
-  const { exitCode, stdout, stderr } = await execFn(
-    'hc',
-    [
-      'auth', 'login',
-      '--api-url', inputs.apiUrl,
-      '--api-token', inputs.token,
-      '--account', inputs.account,
-      '--non-interactive',
-    ],
-    { silent: true },
-  );
+  const args = [
+    'auth', 'login',
+    '--api-url', inputs.apiUrl,
+    '--account', inputs.account,
+    '--api-token', inputs.token,
+    '--non-interactive',
+  ];
+  if (inputs.org)     args.push('--org',     inputs.org);
+  if (inputs.project) args.push('--project', inputs.project);
+
+  const { exitCode, stdout, stderr } = await execFn('hc', args, { silent: true });
 
   if (exitCode !== 0) {
     const raw = [stdout, stderr].filter(Boolean).join('\n').slice(0, 2048);
